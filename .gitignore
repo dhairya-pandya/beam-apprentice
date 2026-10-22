@@ -1,0 +1,15 @@
+# local data and internal notes (never published)
+external/
+research_notes/
+reports/
+docs/superpowers/
+results/
+runs/
+.env
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+.DS_Store
