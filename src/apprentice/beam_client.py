@@ -65,6 +65,19 @@ def _usage_dict(usage) -> dict:
     return dict(usage)
 
 
+def hf_token() -> str:
+    """HF_TOKEN from the environment, else the token saved by `hf auth login`."""
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+        path = os.path.join(home, "token")
+        if os.path.exists(path):
+            token = open(path).read().strip()
+    if not token:
+        raise RuntimeError("no Hugging Face token: set HF_TOKEN or run `hf auth login`")
+    return token
+
+
 def assistant_message(c: Completion) -> dict:
     msg: dict = {"role": "assistant", "content": c.content or ""}
     msg["reasoning_content"] = c.reasoning or ""
@@ -87,9 +100,7 @@ class BeamClient:
     def from_env(cls, ledger: CostLedger, base_url: str = HF_ROUTER, model: str = BEAM_MODEL, **kw):
         from openai import OpenAI
 
-        token = os.environ.get("HF_TOKEN")
-        if not token:
-            raise RuntimeError("HF_TOKEN is not set")
+        token = hf_token()
         return cls(OpenAI(base_url=base_url, api_key=token, timeout=600), ledger, model, **kw)
 
     def _send(self, messages, tools, effort, max_tokens):

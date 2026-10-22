@@ -1,6 +1,6 @@
 """One cheap live call to Beam: prints the raw response shape so the client's assumptions can be checked.
 
-Usage: HF_TOKEN=... uv run python scripts/probe_beam.py
+Usage: uv run python scripts/probe_beam.py
 """
 
 import json
@@ -8,7 +8,7 @@ import os
 
 from openai import OpenAI
 
-from apprentice.beam_client import BEAM_MODEL, HF_ROUTER, BeamClient, assistant_message
+from apprentice.beam_client import BEAM_MODEL, HF_ROUTER, BeamClient, assistant_message, hf_token
 from apprentice.ledger import CostLedger
 
 TOOLS = [{
@@ -24,7 +24,7 @@ TOOLS = [{
     },
 }]
 
-raw = OpenAI(base_url=HF_ROUTER, api_key=os.environ["HF_TOKEN"])
+raw = OpenAI(base_url=HF_ROUTER, api_key=hf_token())
 ledger = CostLedger("runs/ledger.jsonl", cap_usd=25.0, session_cap_usd=0.05)
 client = BeamClient(raw, ledger, meta={"run": "probe"})
 
