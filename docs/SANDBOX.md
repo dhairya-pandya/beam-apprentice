@@ -36,3 +36,7 @@ Deprecation warnings are ignored during verification. Some repos turn every warn
 |---|---|
 | image build (requests) | ~80 s |
 | one verification run | ~10 s (requests) to ~40 s (fastapi) |
+
+## Cost per episode (measured)
+
+First live run at `effort=low` on 2 fastapi tasks: 22 to 25 turns, about $0.02 per episode. In one 22-turn episode, about 145k of the 164k input tokens were served from the provider's prompt cache. That brings the input price down from $0.40 to $0.04 per million tokens, which is why long multi-turn sessions stay cheap. At this rate, $25 covers on the order of a thousand episodes.
