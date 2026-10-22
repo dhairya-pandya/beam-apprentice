@@ -86,6 +86,24 @@ def baseline(
     typer.echo(f"this run spent ${ledger.session_spent():.4f}; lifetime ${ledger.spent():.4f}")
 
 
+@app.command("export-sft")
+def export_sft_cmd(
+    run_ids: list[str] = typer.Argument(..., help="runs to draw verified episodes from"),
+    out: Path = typer.Option(Path("data/sft.jsonl")),
+    data_root: Path = typer.Option(DEFAULT_DATA),
+    runs: Path = typer.Option(Path("runs")),
+    seed: int = typer.Option(0),
+    max_tool_chars: int = typer.Option(3000),
+    one_per_task: bool = typer.Option(False),
+):
+    """Export resolved training-split episodes as fine-tuning data (held-out tasks are never included)."""
+    from apprentice.sft import export_sft
+
+    held, _ = _usable_tasks(data_root, runs, "held_out", seed)
+    counts = export_sft([runs / r for r in run_ids], out, {t.instance_id for t in held}, max_tool_chars, one_per_task)
+    typer.echo(f"{out}: {counts}")
+
+
 @app.command("summarize")
 def summarize_cmd(run_id: str, runs: Path = typer.Option(Path("runs"))):
     """Print resolve rate, cost and stop reasons for a run."""
