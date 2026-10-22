@@ -168,9 +168,9 @@ class Toolset:
             "turns_remaining": max(0, self.limits.turns - self.turns_used),
         }
 
-    def workspace_listing(self, max_entries: int = 200) -> str:
+    def workspace_listing(self, max_entries: int = 80, max_depth: int = 2) -> str:
         cmd = (
-            "find . -mindepth 1 -maxdepth 3 -not -path '*/.*' -not -name '__pycache__' "
+            f"find . -mindepth 1 -maxdepth {int(max_depth)} -not -path '*/.*' -not -name '__pycache__' "
             "-not -name '*.pyc' -not -path '*.egg-info*' | sort | head -n " + shlex.quote(str(max_entries))
         )
         return self.sb.exec(cmd, timeout=60).output

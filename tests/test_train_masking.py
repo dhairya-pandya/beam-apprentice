@@ -45,3 +45,41 @@ def test_prepare_messages_parses_arguments_and_can_drop_thinking():
     assert with_t[0]["reasoning_content"] == "hmm"
     assert "reasoning_content" not in train_sft.prepare_messages(ex, thinking=False)[0]
     assert ex["messages"][0]["tool_calls"][0]["function"]["arguments"] == '{"a": 1}'  # input untouched
+
+
+SESSION = (
+    "<|turn>user\nTASK<turn|>\n<|turn>model\n"
+    + "".join(f"<|tool_call>s{i}<tool_call|><|tool_response>r{i}<tool_response|>" for i in range(6))
+    + "<|tool_call>submit<tool_call|>"
+)
+
+
+def test_split_steps_round_trips():
+    prefix, steps = train_sft.split_steps(SESSION)
+    assert prefix.endswith("<|turn>model\n")
+    assert prefix + "".join(steps) == SESSION
+    assert len(steps) == 7 and steps[-1] == "<|tool_call>submit<tool_call|>"
+
+
+def test_windows_fit_and_train_every_step_once():
+    prefix, steps = train_sft.split_steps(SESSION)
+    n = len  # one "token" per character keeps the test exact
+    max_len = len(prefix) + 3 * len(steps[0]) + 64
+    windows = list(train_sft.make_windows(prefix, steps, n, max_len))
+    assert len(windows) > 1
+    trained = []
+    for text, label_from in windows:
+        assert text.startswith(prefix) and len(text) <= max_len
+        spans = train_sft.clip_spans(train_sft.train_char_spans(text), label_from)
+        trained.append("".join(text[a:b] for a, b in spans))
+    joined = "".join(trained)
+    for i in range(6):
+        assert joined.count(f"s{i}") == 1
+        assert f"r{i}" not in joined
+    assert joined.count("submit") == 1
+
+
+def test_short_session_is_one_window():
+    prefix, steps = train_sft.split_steps(SESSION)
+    windows = list(train_sft.make_windows(prefix, steps, len, 10_000))
+    assert windows == [(SESSION, len(prefix))]

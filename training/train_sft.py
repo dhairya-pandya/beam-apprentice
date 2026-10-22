@@ -7,7 +7,7 @@ act and reason, not to invent command output.
 
 Configured by environment variables so it runs unchanged under `colab exec -f`:
     SFT_DATA=/content/sft.jsonl  SFT_OUT=/content/out  SFT_MODEL=unsloth/gemma-4-E4B-it
-    SFT_MAX_LEN=8192  SFT_EPOCHS=2  SFT_LR=1e-4  SFT_RANK=16  SFT_MAX_STEPS=0  SFT_THINKING=1
+    SFT_MAX_LEN=6144  SFT_EPOCHS=2  SFT_LR=1e-4  SFT_RANK=16  SFT_MAX_STEPS=0  SFT_THINKING=1
 """
 
 from __future__ import annotations
@@ -41,6 +41,54 @@ def train_char_spans(text: str) -> list[tuple[int, int]]:
                 break
             cursor = close_at + len(TOOL_RESPONSE_CLOSE)
     return [(a, b) for a, b in spans if b > a]
+
+
+def split_steps(text: str) -> tuple[str, list[str]]:
+    """Prompt prefix (through the model-turn opener) and agent steps, each ending after a tool result."""
+    i = text.find(MODEL_TURN_OPEN)
+    if i == -1:
+        return text, []
+    prefix, body = text[: i + len(MODEL_TURN_OPEN)], text[i + len(MODEL_TURN_OPEN):]
+    steps, cursor = [], 0
+    while True:
+        close = body.find(TOOL_RESPONSE_CLOSE, cursor)
+        if close == -1:
+            if body[cursor:]:
+                steps.append(body[cursor:])
+            return prefix, steps
+        steps.append(body[cursor : close + len(TOOL_RESPONSE_CLOSE)])
+        cursor = close + len(TOOL_RESPONSE_CLOSE)
+
+
+def make_windows(prefix: str, steps: list[str], n_tokens, max_len: int, margin: int = 64):
+    """Cut a long session into windows that fit max_len.
+
+    Every window repeats the prompt prefix. Each window trains on new steps (up to half the
+    room) and fills the rest with the most recent earlier steps as untrained context, so every
+    step is learned once, always with the task in view. Yields (text, label_from_char).
+    """
+    room = max_len - n_tokens(prefix) - margin
+    sizes = [n_tokens(s) for s in steps]
+    i = 0
+    while i < len(steps):
+        if sizes[i] > room:  # a single step that can never fit is skipped
+            i += 1
+            continue
+        j, used = i, 0
+        while j < len(steps) and used + sizes[j] <= max(room // 2, sizes[i]):
+            used += sizes[j]
+            j += 1
+        k = i
+        while k > 0 and used + sizes[k - 1] <= room:
+            k -= 1
+            used += sizes[k]
+        context = "".join(steps[k:i])
+        yield prefix + context + "".join(steps[i:j]), len(prefix) + len(context)
+        i = j
+
+
+def clip_spans(spans, start: int):
+    return [(max(a, start), b) for a, b in spans if b > start]
 
 
 def labels_from_offsets(input_ids: list[int], offsets: list[tuple[int, int]], spans) -> list[int]:
@@ -99,13 +147,14 @@ def main() -> None:
     data_path = os.environ.get("SFT_DATA", "/content/sft.jsonl")
     out_dir = os.environ.get("SFT_OUT", "/content/out")
     model_id = os.environ.get("SFT_MODEL", "unsloth/gemma-4-E4B-it")
-    max_len = int(os.environ.get("SFT_MAX_LEN", "8192"))
+    max_len = int(os.environ.get("SFT_MAX_LEN", "6144"))
     epochs = float(os.environ.get("SFT_EPOCHS", "2"))
     lr = float(os.environ.get("SFT_LR", "1e-4"))
     rank = int(os.environ.get("SFT_RANK", "16"))
     max_steps = int(os.environ.get("SFT_MAX_STEPS", "0"))
     thinking = os.environ.get("SFT_THINKING", "1") == "1"
 
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     _start_memory_log()
 
     import torch
@@ -119,27 +168,32 @@ def main() -> None:
     )
     tok = getattr(tokenizer, "tokenizer", tokenizer)  # multimodal processors wrap the text tokenizer
 
-    rows, dropped, lengths = [], 0, []
+    n_tokens = lambda t: len(tok(t, add_special_tokens=False)["input_ids"])
+    rows, dropped, lengths, sessions = [], 0, [], 0
     for line in open(data_path):
         ex = json.loads(line)
+        sessions += 1
         text = tok.apply_chat_template(
             prepare_messages(ex, thinking), tools=ex["tools"], tokenize=False,
             enable_thinking=thinking, preserve_thinking=thinking,
         )
-        enc = tok(text, add_special_tokens=False, return_offsets_mapping=True)
-        n = len(enc["input_ids"])
-        lengths.append(n)
-        if n > max_len:
-            dropped += 1
-            continue
-        labels = labels_from_offsets(enc["input_ids"], enc["offset_mapping"], train_char_spans(text))
-        if sum(l != -100 for l in labels) == 0:
-            dropped += 1
-            continue
-        rows.append({"input_ids": enc["input_ids"], "attention_mask": [1] * n, "labels": labels})
+        prefix, steps = split_steps(text)
+        for window, label_from in make_windows(prefix, steps, n_tokens, max_len):
+            enc = tok(window, add_special_tokens=False, return_offsets_mapping=True)
+            n = len(enc["input_ids"])
+            lengths.append(n)
+            if n > max_len:
+                dropped += 1
+                continue
+            spans = clip_spans(train_char_spans(window), label_from)
+            labels = labels_from_offsets(enc["input_ids"], enc["offset_mapping"], spans)
+            if sum(l != -100 for l in labels) == 0:
+                dropped += 1
+                continue
+            rows.append({"input_ids": enc["input_ids"], "attention_mask": [1] * n, "labels": labels})
     lengths.sort()
     print(json.dumps({
-        "examples": len(rows), "dropped_too_long_or_empty": dropped,
+        "sessions": sessions, "windows": len(rows), "dropped_too_long_or_empty": dropped,
         "tokens_p50": lengths[len(lengths) // 2] if lengths else 0, "tokens_max": lengths[-1] if lengths else 0,
         "trainable_tokens": sum(sum(l != -100 for l in r["labels"]) for r in rows),
     }), flush=True)
