@@ -73,6 +73,28 @@ def prepare_messages(example: dict, thinking: bool) -> list[dict]:
     return out
 
 
+def _start_memory_log(every_s: int = 20) -> None:
+    """Print host RAM and GPU memory periodically, so an out-of-memory death leaves a trail."""
+    import subprocess
+    import threading
+    import time
+
+    def loop():
+        while True:
+            try:
+                ram = open("/proc/meminfo").read().split("\n")
+                info = {l.split(":")[0]: int(l.split()[1]) // 1024 for l in ram if l.startswith(("MemTotal", "MemAvailable"))}
+                gpu = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"],
+                                     capture_output=True, text=True).stdout.strip()
+                print(f"[mem] ram_available={info.get('MemAvailable')}MB/{info.get('MemTotal')}MB gpu_used={gpu}",
+                      flush=True)
+            except Exception:
+                pass
+            time.sleep(every_s)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def main() -> None:
     data_path = os.environ.get("SFT_DATA", "/content/sft.jsonl")
     out_dir = os.environ.get("SFT_OUT", "/content/out")
@@ -83,6 +105,8 @@ def main() -> None:
     rank = int(os.environ.get("SFT_RANK", "16"))
     max_steps = int(os.environ.get("SFT_MAX_STEPS", "0"))
     thinking = os.environ.get("SFT_THINKING", "1") == "1"
+
+    _start_memory_log()
 
     import torch
     from unsloth import FastModel  # import before transformers so its patches apply
@@ -139,7 +163,7 @@ def main() -> None:
         max_steps=max_steps if max_steps > 0 else -1,
         learning_rate=lr,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.05,
+        warmup_steps=int(os.environ.get("SFT_WARMUP_STEPS", "2")),
         logging_steps=1,
         save_strategy="no",
         bf16=bf16,
