@@ -11,7 +11,7 @@ from apprentice.tasks import load_tasks
 from apprentice.verify import build_reference, verify
 
 DATA = Path(os.environ.get("APPRENTICE_DATA", "external/swe-tasks"))
-TASK_IDS = os.environ.get("APPRENTICE_TEST_TASKS", "requests_6592,rich_3061,fastapi_14077").split(",")
+TASK_IDS = os.environ.get("APPRENTICE_TEST_TASKS", "requests_6592,rich_3061,httpx_3672").split(",")
 
 pytestmark = pytest.mark.docker
 

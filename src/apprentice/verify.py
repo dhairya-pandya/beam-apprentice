@@ -115,6 +115,7 @@ def run_tests(task: Task, patch: str, data_root: Path) -> TestRun:
         quoted = " ".join(shlex.quote(t) for t in py_targets)
         res = sb.exec(
             f"python -m pytest {quoted} -q -p no:cacheprovider -o addopts='' "
+            f"-W ignore::DeprecationWarning -W ignore::PendingDeprecationWarning "
             f"--junitxml={JUNIT} --timeout={PYTEST_TIMEOUT}",
             timeout=PYTEST_TIMEOUT + 60,
         )

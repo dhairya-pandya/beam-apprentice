@@ -76,7 +76,7 @@ class Sandbox:
         r = _docker(
             "run", "-d", "--rm", "--name", name, "--network", "none",
             "--memory", self.memory, "--cpus", self.cpus,
-            image_name(self.task.repo), "sleep", "infinity",
+            *self._wheel_mount(), image_name(self.task.repo), "sleep", "infinity",
         )
         if r.returncode != 0:
             raise RuntimeError(f"docker run failed: {r.stderr.decode()[-500:]}")
@@ -88,6 +88,10 @@ class Sandbox:
             raise
         return self
 
+    def _wheel_mount(self) -> list[str]:
+        wheels = self.data_root / "wheels"
+        return ["-v", f"{wheels.resolve()}:/wheels:ro"] if wheels.is_dir() else []
+
     def _setup(self, snap: Path) -> None:
         r = _docker("cp", str(snap), f"{self.container}:/tmp/snapshot.tgz")
         if r.returncode != 0:
@@ -96,7 +100,10 @@ class Sandbox:
             "mkdir -p /workspace && tar xzf /tmp/snapshot.tgz -C /workspace && rm /tmp/snapshot.tgz",
             "find /workspace -xtype l -delete",
             f"printf %s {shlex.quote(GIT_EXCLUDE)} >> /workspace/.git/info/exclude",
-            "pip install -q --no-index --no-deps --no-build-isolation -e /workspace >/dev/null 2>&1 || true",
+            # Re-resolve this commit's dependency pins against local wheels, offline; fall back to no-deps.
+            "(test -d /wheels && pip install -q --no-index --find-links /wheels --no-build-isolation -e /workspace"
+            " >/tmp/deps.log 2>&1) || pip install -q --no-index --no-deps --no-build-isolation -e /workspace"
+            " >/dev/null 2>&1 || true",
             "git add -A && git commit -q --allow-empty -m baseline",
         ]
         for step in steps:
