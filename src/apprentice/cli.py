@@ -62,6 +62,7 @@ def baseline(
     base_url: str = typer.Option(HF_ROUTER),
     api_key: str = typer.Option("", help="for local servers; default uses your Hugging Face login"),
     free: bool = typer.Option(False, help="price calls at $0 (local model)"),
+    workers: int = typer.Option(1, help="episodes to run in parallel"),
 ):
     """Run a model through the gym on a task split, verify each patch, and record traces."""
     tasks, refs = _usable_tasks(data_root, runs, split, seed)
@@ -81,6 +82,7 @@ def baseline(
         out_dir=out_dir,
         effort=effort,
         log=typer.echo,
+        workers=workers,
     )
     typer.echo(summarize(read_results(out_dir)))
     typer.echo(f"this run spent ${ledger.session_spent():.4f}; lifetime ${ledger.spent():.4f}")

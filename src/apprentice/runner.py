@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import collections
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
@@ -20,25 +22,44 @@ def run_baseline(
     effort: str,
     resume: bool = True,
     log: Callable[[str], None] = print,
+    workers: int = 1,
 ) -> list[dict]:
     done = {(r["instance_id"], r["effort"]) for r in read_results(out_dir)} if resume else set()
     todo = [t for t in tasks if (t.instance_id, effort) not in done]
     log(f"{len(tasks) - len(todo)} done already, {len(todo)} to run at effort={effort}")
-    for i, task in enumerate(todo, 1):
+    lock = threading.Lock()
+    stop = threading.Event()
+    finished = [0]
+
+    def one(task: Task) -> None:
+        if stop.is_set():
+            return
         ep = episode_fn(task)
         result = (
             verify_fn(task, ep.patch)
             if ep.patch.strip()
             else VerifyResult(False, False, 0, 0, log="no patch")
         )
-        write_trace(ep, result, out_dir, task.repo)
-        log(
-            f"[{i}/{len(todo)}] {task.instance_id}: {'RESOLVED' if result.resolved else 'failed'} "
-            f"stop={ep.stop_reason} turns={ep.turns} ${ep.cost_usd:.4f}"
-        )
-        if ep.stop_reason == "budget":
-            log(f"spend cap reached, stopping: {ep.error}")
-            break
+        with lock:
+            write_trace(ep, result, out_dir, task.repo)
+            finished[0] += 1
+            log(
+                f"[{finished[0]}/{len(todo)}] {task.instance_id}: {'RESOLVED' if result.resolved else 'failed'} "
+                f"stop={ep.stop_reason} turns={ep.turns} ${ep.cost_usd:.4f}"
+            )
+            if ep.stop_reason == "budget" and not stop.is_set():
+                stop.set()
+                log(f"spend cap reached, stopping: {ep.error}")
+
+    if workers <= 1:
+        for task in todo:
+            one(task)
+            if stop.is_set():
+                break
+    else:
+        with ThreadPoolExecutor(workers) as pool:
+            for fut in [pool.submit(one, t) for t in todo]:
+                fut.result()
     return read_results(out_dir)
 
 

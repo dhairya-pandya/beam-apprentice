@@ -55,3 +55,17 @@ def test_summarize_counts(tmp_path):
     assert "ALL" in text and "org/a" in text
     assert "33.3%" in text
     assert "stop reasons: submitted=3" in text
+
+
+def test_parallel_workers_run_every_task_once(tmp_path):
+    tasks = [Task(f"p{i}", "org/a", "c", "", "", "bug") for i in range(8)]
+    rows = run_baseline(tasks, ep, lambda t, p: VerifyResult(True, True, 1, 0), tmp_path, "low",
+                        log=lambda s: None, workers=4)
+    assert sorted(r["instance_id"] for r in rows) == [f"p{i}" for i in range(8)]
+
+
+def test_parallel_budget_stop_skips_unstarted(tmp_path):
+    tasks = [Task(f"q{i}", "org/a", "c", "", "", "bug") for i in range(20)]
+    rows = run_baseline(tasks, lambda t: ep(t, stop="budget"), lambda t, p: VerifyResult(False, True, 0, 1),
+                        tmp_path, "low", log=lambda s: None, workers=2)
+    assert len(rows) < 20
