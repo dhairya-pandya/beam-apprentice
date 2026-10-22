@@ -63,10 +63,14 @@ def baseline(
     api_key: str = typer.Option("", help="for local servers; default uses your Hugging Face login"),
     free: bool = typer.Option(False, help="price calls at $0 (local model)"),
     workers: int = typer.Option(1, help="episodes to run in parallel"),
+    unsolved_in: str = typer.Option("", help="only tasks not resolved in these runs (comma-separated run ids)"),
 ):
     """Run a model through the gym on a task split, verify each patch, and record traces."""
     tasks, refs = _usable_tasks(data_root, runs, split, seed)
     tasks = [t for t in tasks if snapshot_path(t, data_root).exists()]
+    if unsolved_in:
+        solved = {r["instance_id"] for rid in unsolved_in.split(",") for r in read_results(runs / rid) if r["resolved"]}
+        tasks = [t for t in tasks if t.instance_id not in solved]
     if limit:
         tasks = tasks[:limit]
     prices = Prices(0, 0, 0) if free else Prices()
