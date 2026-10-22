@@ -9,7 +9,7 @@ import typer
 
 from apprentice.beam_client import BEAM_MODEL, HF_ROUTER, BeamClient
 from apprentice.episode import run_episode
-from apprentice.ledger import CostLedger
+from apprentice.ledger import CostLedger, Prices
 from apprentice.runner import run_baseline, summarize
 from apprentice.sandbox import build_image, image_exists, snapshot_path
 from apprentice.tasks import load_tasks, split_tasks
@@ -50,7 +50,7 @@ def baseline(
     runs: Path = typer.Option(Path("runs")),
     run_id: str = typer.Option(..., help="results go to runs/<run_id>/"),
     split: str = typer.Option("train", help="train | held_out | all"),
-    effort: str = typer.Option("low", help="low | medium | high | xhigh | max"),
+    effort: str = typer.Option("low", help="low | medium | high | xhigh | max, or none for models without one"),
     limit: int = typer.Option(0, help="max tasks this invocation (0 = all)"),
     budget_usd: float = typer.Option(2.0, help="spend cap for this invocation"),
     lifetime_cap_usd: float = typer.Option(25.0, help="cap across all runs in the ledger"),
@@ -60,15 +60,18 @@ def baseline(
     seed: int = typer.Option(0),
     model: str = typer.Option(BEAM_MODEL),
     base_url: str = typer.Option(HF_ROUTER),
+    api_key: str = typer.Option("", help="for local servers; default uses your Hugging Face login"),
+    free: bool = typer.Option(False, help="price calls at $0 (local model)"),
 ):
     """Run a model through the gym on a task split, verify each patch, and record traces."""
     tasks, refs = _usable_tasks(data_root, runs, split, seed)
     tasks = [t for t in tasks if snapshot_path(t, data_root).exists()]
     if limit:
         tasks = tasks[:limit]
-    ledger = CostLedger(runs / "ledger.jsonl", cap_usd=lifetime_cap_usd, session_cap_usd=budget_usd)
+    prices = Prices(0, 0, 0) if free else Prices()
+    ledger = CostLedger(runs / "ledger.jsonl", cap_usd=lifetime_cap_usd, session_cap_usd=budget_usd, prices=prices)
     typer.echo(f"lifetime spend so far ${ledger.spent():.4f} / ${lifetime_cap_usd:.2f}; this run capped at ${budget_usd:.2f}")
-    client = BeamClient.from_env(ledger, base_url=base_url, model=model, meta={"run": run_id})
+    client = BeamClient.from_env(ledger, base_url=base_url, model=model, api_key=api_key or None, meta={"run": run_id})
     limits = Limits(turns=turns, tool_calls=tool_calls)
     out_dir = runs / run_id
     run_baseline(

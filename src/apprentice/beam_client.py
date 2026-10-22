@@ -97,19 +97,17 @@ class BeamClient:
         self.meta = meta or {}
 
     @classmethod
-    def from_env(cls, ledger: CostLedger, base_url: str = HF_ROUTER, model: str = BEAM_MODEL, **kw):
+    def from_env(cls, ledger: CostLedger, base_url: str = HF_ROUTER, model: str = BEAM_MODEL,
+                 api_key: str | None = None, **kw):
         from openai import OpenAI
 
-        token = hf_token()
+        token = api_key or hf_token()
         return cls(OpenAI(base_url=base_url, api_key=token, timeout=600), ledger, model, **kw)
 
     def _send(self, messages, tools, effort, max_tokens):
-        kwargs = dict(
-            model=self.model,
-            messages=messages,
-            reasoning_effort=effort,
-            max_completion_tokens=max_tokens,
-        )
+        kwargs = dict(model=self.model, messages=messages, max_completion_tokens=max_tokens)
+        if effort != "none":  # "none" = model without a reasoning dial (e.g. a local student)
+            kwargs["reasoning_effort"] = effort
         if tools:
             kwargs["tools"] = tools
         for attempt in range(TRANSIENT_RETRIES + 1):

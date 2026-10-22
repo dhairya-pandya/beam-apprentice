@@ -85,3 +85,9 @@ def test_usage_is_recorded(tmp_path):
     client = _client(fake, tmp_path)
     client.complete([], [], "low", 100)
     assert client.ledger.spent() == pytest.approx(0.40)
+
+
+def test_effort_none_omits_reasoning_effort(tmp_path):
+    fake = FakeOpenAI([_resp(content="x")])
+    _client(fake, tmp_path).complete([], [], "none", 100)
+    assert "reasoning_effort" not in fake.calls[0]
