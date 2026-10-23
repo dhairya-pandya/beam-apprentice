@@ -78,3 +78,61 @@ def test_tool_call_counting_and_status(local_sandbox):
     call(ts, "submit_patch")
     assert ts.tool_calls_used == 1
     assert call(ts, "get_status")["tool_calls_remaining"] == 4
+
+
+INDENTED = (
+    "class A:\n"
+    "    def f(self):\n"
+    "        if x:\n"
+    "            return 1\n"
+    "        return 2\n"
+)
+
+
+def test_edit_matches_ignoring_indentation_and_reindents(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    ts = Toolset(local_sandbox, Limits())
+    out = call(ts, "edit_file", filepath="i.py",
+               old_string="if x:\n    return 1", new_string="if x and y:\n    return 10")
+    assert out["status"] == "ok" and out["matched"] == "ignoring indentation"
+    assert local_sandbox.read("i.py") == INDENTED.replace(
+        "        if x:\n            return 1", "        if x and y:\n            return 10")
+
+
+def test_edit_tolerant_match_handles_trailing_newline_and_extra_indent(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    ts = Toolset(local_sandbox, Limits())
+    out = call(ts, "edit_file", filepath="i.py",
+               old_string="                return 2\n", new_string="                return 3\n")
+    assert out["status"] == "ok"
+    assert "        return 3\n" in local_sandbox.read("i.py")
+
+
+def test_edit_tolerant_match_must_be_unique(local_sandbox):
+    local_sandbox.write("d.py", "def a():\n    pass\n\ndef b():\n  pass\n")
+    ts = Toolset(local_sandbox, Limits())
+    assert call(ts, "edit_file", filepath="d.py", old_string="pass", new_string="return")["status"] == "error"
+
+
+def test_exact_match_still_preferred(local_sandbox):
+    local_sandbox.write("e.py", "x = 1\n")
+    out = call(Toolset(local_sandbox, Limits()), "edit_file", filepath="e.py", old_string="x = 1", new_string="x = 2")
+    assert out["status"] == "ok" and out.get("matched", "exact") == "exact"
+
+
+def test_edit_decodes_literal_escape_sequences(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    ts = Toolset(local_sandbox, Limits())
+    out = call(ts, "edit_file", filepath="i.py",
+               old_string="        if x:\\n            return 1", new_string="        if x:\\n            return 5")
+    assert out["status"] == "ok" and out["matched"] == "after decoding escapes"
+    assert "            return 5\n" in local_sandbox.read("i.py")
+    assert "\\n" not in local_sandbox.read("i.py")
+
+
+def test_write_file_decodes_escapes_only_when_no_real_newlines(local_sandbox):
+    ts = Toolset(local_sandbox, Limits())
+    call(ts, "write_file", filepath="w.py", content="a = 1\\nb = 2\\n")
+    assert local_sandbox.read("w.py") == "a = 1\nb = 2\n"
+    call(ts, "write_file", filepath="v.py", content='s = "x\\ny"\nt = 1\n')
+    assert local_sandbox.read("v.py") == 's = "x\\ny"\nt = 1\n'

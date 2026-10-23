@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["torch", "transformers", "peft", "accelerate", "huggingface_hub", "sentencepiece", "protobuf", "numpy"]
+# dependencies = ["torch", "transformers", "peft", "accelerate", "huggingface_hub", "sentencepiece", "protobuf", "numpy", "pillow", "torchvision"]
 # ///
 """Merge the student LoRA into the base model and export base and student as GGUF.
 
@@ -36,26 +36,34 @@ def main() -> None:
     import torch
     from huggingface_hub import HfApi, snapshot_download
     from peft import PeftModel
-    from transformers import AutoModelForImageTextToText, AutoProcessor
+    from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
 
     base_dir = Path(snapshot_download(base_id))
-    model = AutoModelForImageTextToText.from_pretrained(base_dir, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
+    try:
+        model = AutoModelForImageTextToText.from_pretrained(base_dir, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
+    except (ValueError, KeyError):  # text-only checkpoints
+        model = AutoModelForCausalLM.from_pretrained(base_dir, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
     model = PeftModel.from_pretrained(model, adapter_id)
     model = model.merge_and_unload()
     merged_dir = work / "merged"
     model.save_pretrained(merged_dir, safe_serialization=True)
-    AutoProcessor.from_pretrained(base_dir).save_pretrained(merged_dir)
+    try:
+        AutoProcessor.from_pretrained(base_dir).save_pretrained(merged_dir)
+    except Exception:
+        AutoTokenizer.from_pretrained(base_dir).save_pretrained(merged_dir)
     for name in ("chat_template.jinja", "tokenizer.model", "tokenizer.json", "tokenizer_config.json"):
         if (base_dir / name).exists() and not (merged_dir / name).exists():
             shutil.copy(base_dir / name, merged_dir / name)
     del model
 
     run(["git", "clone", "--depth", "1", "https://github.com/ggml-org/llama.cpp", str(work / "llama.cpp")])
-    run([sys.executable, "-m", "pip", "install", "-q", "-r", str(work / "llama.cpp" / "requirements" / "requirements-convert_hf_to_gguf.txt")])
+    # the converter's only extra dependency is llama.cpp's own gguf package, which ships in the repo
+    os.environ["PYTHONPATH"] = str(work / "llama.cpp" / "gguf-py") + os.pathsep + os.environ.get("PYTHONPATH", "")
     convert = str(work / "llama.cpp" / "convert_hf_to_gguf.py")
+    stem = os.environ.get("NAME", base_id.split("/")[-1])
     outputs = {
-        f"gemma-4-E4B-it-base-{outtype}.gguf": base_dir,
-        f"gemma-4-E4B-it-apprentice-{outtype}.gguf": merged_dir,
+        f"{stem}-base-{outtype}.gguf": base_dir,
+        f"{stem}-apprentice-{outtype}.gguf": merged_dir,
     }
     api = HfApi()
     for name, src in outputs.items():

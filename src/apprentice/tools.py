@@ -61,6 +61,68 @@ class ToolError(Exception):
     pass
 
 
+_ESCAPES = {"\\n": "\n", "\\t": "\t", '\\"': '"', "\\\\": "\\"}
+
+
+def _decode_escapes(text: str) -> str:
+    """Turn literal \\n, \\t, \\" and \\\\ (copied from JSON-encoded tool output) into real characters."""
+    out, i = [], 0
+    while i < len(text):
+        pair = text[i : i + 2]
+        if pair in _ESCAPES:
+            out.append(_ESCAPES[pair])
+            i += 2
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _looks_escaped(text: str) -> bool:
+    return "\\n" in text and "\n" not in text
+
+
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _replace_ignoring_indentation(text: str, old: str, new: str) -> str | None:
+    """Fallback for edit_file: match old line by line ignoring surrounding whitespace.
+
+    Only a unique match is accepted. The replacement is re-indented by the difference between
+    the matched block's indentation and the indentation the caller wrote.
+    """
+    old_lines = old.split("\n")
+    new_lines = new.split("\n")
+    while old_lines and not old_lines[-1].strip():
+        old_lines.pop()
+    while new_lines and not new_lines[-1].strip():
+        new_lines.pop()
+    while old_lines and not old_lines[0].strip():
+        old_lines.pop(0)
+    if not old_lines:
+        return None
+    lines = text.split("\n")
+    want = [l.strip() for l in old_lines]
+    hits = [i for i in range(len(lines) - len(want) + 1)
+            if [l.strip() for l in lines[i : i + len(want)]] == want]
+    if len(hits) != 1:
+        return None
+    start = hits[0]
+    have_indent = _indent(lines[start])
+    wrote_indent = _indent(old_lines[0])
+
+    def reindent(line: str) -> str:
+        if not line.strip():
+            return line
+        if line.startswith(wrote_indent):
+            return have_indent + line[len(wrote_indent):]
+        return have_indent + line.lstrip()
+
+    replaced = [reindent(l) for l in new_lines]
+    return "\n".join(lines[:start] + replaced + lines[start + len(want):])
+
+
 class Toolset:
     def __init__(self, sandbox, limits: Limits):
         self.sb = sandbox
@@ -143,14 +205,28 @@ class Toolset:
             raise ToolError("old_string must not be empty")
         count = text.count(old_string)
         if count == 0:
-            raise ToolError("old_string not found; read the file again and copy the text exactly")
+            fuzzy = _replace_ignoring_indentation(text, old_string, new_string)
+            matched = "ignoring indentation"
+            if fuzzy is None and _looks_escaped(old_string):
+                old_d, new_d = _decode_escapes(old_string), _decode_escapes(new_string)
+                if text.count(old_d) == 1:
+                    fuzzy = text.replace(old_d, new_d)
+                else:
+                    fuzzy = _replace_ignoring_indentation(text, old_d, new_d)
+                matched = "after decoding escapes"
+            if fuzzy is None:
+                raise ToolError("old_string not found; read the file again and copy the text exactly")
+            self.sb.write(path, fuzzy)
+            return {"status": "ok", "replacements": 1, "matched": matched}
         if count > 1 and not allow_multiple:
             raise ToolError(f"old_string matches {count} times; add context or set allow_multiple")
         self.sb.write(path, text.replace(old_string, new_string))
-        return {"status": "ok", "replacements": count}
+        return {"status": "ok", "replacements": count, "matched": "exact"}
 
     def _t_write_file(self, filepath: str, content: str) -> dict:
         path = self._path(filepath)
+        if _looks_escaped(content):
+            content = _decode_escapes(content)
         self.sb.write(path, content)
         return {"status": "ok", "bytes": len(content.encode())}
 
