@@ -37,6 +37,31 @@ That gives 53 training tasks with at least one test-verified Beam session. Those
 
 Everything above cost about $6.50 of inference: the probe, the smoke test, 145 training episodes and 81 held-out episodes. Prompt caching does most of the work here. In a typical 20-turn session, around 90% of input tokens are served from cache.
 
-## Untuned Gemma 4 E4B
+## Gym fixes found by watching a small model fail
 
-In a one-task pilot, the untuned 4B model looked around the repo, asked twice for the problem statement even though it was in the prompt, and submitted a patch that changed nothing useful. The full held-out run for the untuned and fine-tuned students comes next.
+The first student run exposed two ways `edit_file` rejected edits that were right in substance:
+
+- **Wrong leading whitespace.** The agent quotes the correct lines but miscounts the indentation.
+- **Copied JSON escapes.** Tool results reach the model as JSON, so file text shows up as `\n` and `\t`. Smaller models copy those characters literally into `old_string`.
+
+On the strict tool, Beam failed 8 of 22 edits on held-out tasks and the 4B student failed 51 of 54. Since gym v1.2, `edit_file` falls back to a unique line-by-line match that ignores surrounding whitespace, then to a match after decoding escapes. It re-indents the replacement to fit. Full disclosure: these fixes came from studying held-out failures, so every model was re-run on v1.2 and the numbers below all come from v1.2.
+
+Beam's held-out solve rate across three runs at `low` (v1.0, v1.1, v1.2) was 18, 16 and 17 of 27. Treat Beam as roughly 63% on this set, plus or minus about a task.
+
+## Students on held-out tasks (gym v1.2, n = 27)
+
+| model | solved | mean turns | ran out of turns |
+|---|---|---|---|
+| Beam 501B, `low` | 17 (63%) | 22.1 | 1 |
+| Gemma 4 E4B, untuned | 5 (18.5%) | 11.6 | 0 |
+| Gemma 4 E4B + LoRA on 53 Beam sessions (v1) | 0 | 34.4 | 17 |
+
+Both Gemma models were served the same way: Q8_0 GGUF through llama-server, a 64k context, and thinking enabled and kept in history.
+
+**The first fine-tune made things worse.** Student v1 picked up Beam's way of working: grep, read, edit, run tests. It did not pick up the judgement that makes that pay off. It explored for longer, kept retrying, sometimes dug through `git log` for a fix that does not exist in the snapshot, and ran out of turns on 17 of 27 tasks. The untuned model is blunt. It submits within about 12 turns, and on the easier tasks that is enough.
+
+Likely reasons, and what the next run changes:
+
+- **Most training windows were mid-exploration.** Long sessions were cut into 8k-token windows, and only about 29% of windows ended with a submit. The 12B run uses 16k windows.
+- **Too little data for a 4B model to learn when to stop.** There were 53 sessions. The next run adds two more Beam passes over the training tasks.
+- **Capacity.** The next student is Gemma 4 12B, compared against its own untuned baseline.
