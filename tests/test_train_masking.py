@@ -83,3 +83,25 @@ def test_short_session_is_one_window():
     prefix, steps = train_sft.split_steps(SESSION)
     windows = list(train_sft.make_windows(prefix, steps, len, 10_000))
     assert windows == [(SESSION, len(prefix))]
+
+
+def test_last_step_window_trains_only_final_step():
+    prefix, steps = train_sft.split_steps(SESSION)
+    text, label_from = train_sft.last_step_window(prefix, steps, len, 10_000)
+    assert text == SESSION
+    spans = train_sft.clip_spans(train_sft.train_char_spans(text), label_from)
+    trained = "".join(text[a:b] for a, b in spans)
+    assert trained == "<|tool_call>submit<tool_call|>"
+
+
+def test_last_step_window_drops_oldest_context_to_fit():
+    prefix, steps = train_sft.split_steps(SESSION)
+    max_len = len(prefix) + len(steps[-1]) + 2 * len(steps[0]) + 64
+    text, label_from = train_sft.last_step_window(prefix, steps, len, max_len)
+    assert text.startswith(prefix) and text.endswith(steps[-1]) and len(text) <= max_len
+    assert "s0" not in text and "s5" in text
+
+
+def test_last_step_window_none_when_step_too_big():
+    prefix, steps = train_sft.split_steps(SESSION)
+    assert train_sft.last_step_window(prefix, steps, len, len(prefix) + 5) is None

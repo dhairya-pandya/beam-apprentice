@@ -70,3 +70,32 @@ def export_sft(
         for ex in examples:
             f.write(json.dumps(ex) + "\n")
     return {"examples": len(examples), "tasks": len(seen), **skipped}
+
+
+def export_dagger(label_files: list[Path], out_path: Path, held_out_ids: set[str]) -> dict:
+    """Turn on-policy labels (state + teacher's next action) into last-step training rows."""
+    rows = []
+    counts = {"examples": 0, "skipped_nudge_state": 0, "held_out": 0}
+    for path in label_files:
+        for line in Path(path).read_text().splitlines():
+            if not line.strip():
+                continue
+            s = json.loads(line)
+            if s["instance_id"] in held_out_ids:
+                counts["held_out"] += 1
+                continue
+            last = s["history"][-1]["role"] if s["history"] else ""
+            if last not in ("tool",) and len(s["history"]) > 2:
+                counts["skipped_nudge_state"] += 1
+                continue
+            rows.append({
+                "instance_id": s["instance_id"], "repo": s.get("repo", ""), "step": s.get("step", 0),
+                "turns": s.get("step", 0) + 1, "messages": s["history"] + [s["teacher"]],
+                "tools": SCHEMAS, "train_last_step": True,
+            })
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    counts["examples"] = len(rows)
+    return counts

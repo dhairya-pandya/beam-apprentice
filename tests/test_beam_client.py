@@ -91,3 +91,11 @@ def test_effort_none_omits_reasoning_effort(tmp_path):
     fake = FakeOpenAI([_resp(content="x")])
     _client(fake, tmp_path).complete([], [], "none", 100)
     assert "reasoning_effort" not in fake.calls[0]
+
+
+def test_extra_body_is_sent(tmp_path):
+    fake = FakeOpenAI([_resp(content="x")])
+    client = BeamClient(fake, ledger=CostLedger(tmp_path / "l.jsonl", cap_usd=10), model="m",
+                        extra_body={"allow_missing_thinking": True})
+    client.complete([], [], "low", 100)
+    assert fake.calls[0]["extra_body"] == {"allow_missing_thinking": True}

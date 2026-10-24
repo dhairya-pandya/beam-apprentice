@@ -90,11 +90,13 @@ def assistant_message(c: Completion) -> dict:
 
 
 class BeamClient:
-    def __init__(self, openai_client, ledger: CostLedger, model: str = BEAM_MODEL, meta: dict | None = None):
+    def __init__(self, openai_client, ledger: CostLedger, model: str = BEAM_MODEL, meta: dict | None = None,
+                 extra_body: dict | None = None):
         self.client = openai_client
         self.ledger = ledger
         self.model = model
         self.meta = meta or {}
+        self.extra_body = extra_body
 
     @classmethod
     def from_env(cls, ledger: CostLedger, base_url: str = HF_ROUTER, model: str = BEAM_MODEL,
@@ -110,6 +112,8 @@ class BeamClient:
             kwargs["reasoning_effort"] = effort
         if tools:
             kwargs["tools"] = tools
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
         for attempt in range(TRANSIENT_RETRIES + 1):
             try:
                 return self.client.chat.completions.create(**kwargs)

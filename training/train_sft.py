@@ -95,6 +95,25 @@ def make_windows(prefix: str, steps: list[str], n_tokens, max_len: int, margin: 
         i = j
 
 
+def last_step_window(prefix: str, steps: list[str], n_tokens, max_len: int, margin: int = 64):
+    """Prompt prefix + as many recent steps as fit + the final step; only the final step is trained.
+
+    Used for on-policy distillation examples, where the last step is the teacher's action at a
+    state the student reached. Returns (text, label_from) or None if the final step cannot fit."""
+    if not steps:
+        return None
+    room = max_len - n_tokens(prefix) - margin - n_tokens(steps[-1])
+    if room < 0:
+        return None
+    k = len(steps) - 1
+    used = 0
+    while k > 0 and used + n_tokens(steps[k - 1]) <= room:
+        k -= 1
+        used += n_tokens(steps[k])
+    context = "".join(steps[k:-1])
+    return prefix + context + steps[-1], len(prefix) + len(context)
+
+
 def clip_spans(spans, start: int):
     return [(max(a, start), b) for a, b in spans if b > start]
 
@@ -197,7 +216,12 @@ def main() -> None:
             enable_thinking=thinking, preserve_thinking=thinking,
         )
         prefix, steps = split_steps(text)
-        for window, label_from in make_windows(prefix, steps, n_tokens, max_len):
+        if ex.get("train_last_step"):
+            one = last_step_window(prefix, steps, n_tokens, max_len)
+            windows = [one] if one else []
+        else:
+            windows = make_windows(prefix, steps, n_tokens, max_len)
+        for window, label_from in windows:
             enc = tok(window, add_special_tokens=False, return_offsets_mapping=True)
             n = len(enc["input_ids"])
             lengths.append(n)

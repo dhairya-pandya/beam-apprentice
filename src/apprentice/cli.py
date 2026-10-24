@@ -92,6 +92,56 @@ def baseline(
     typer.echo(f"this run spent ${ledger.session_spent():.4f}; lifetime ${ledger.spent():.4f}")
 
 
+@app.command()
+def dagger(
+    run_id: str = typer.Option(..., help="results go to runs/<run_id>/; labels to runs/<run_id>/dagger.jsonl"),
+    student_url: str = typer.Option(..., help="OpenAI-compatible base URL serving the student"),
+    student_model: str = typer.Option("student"),
+    data_root: Path = typer.Option(DEFAULT_DATA),
+    runs: Path = typer.Option(Path("runs")),
+    split: str = typer.Option("train"),
+    beta: float = typer.Option(0.3, help="chance of executing the teacher's action instead of the student's"),
+    teacher_effort: str = typer.Option("low"),
+    limit: int = typer.Option(0),
+    budget_usd: float = typer.Option(5.0, help="spend cap on teacher calls for this invocation"),
+    lifetime_cap_usd: float = typer.Option(25.0),
+    workers: int = typer.Option(4),
+    turns: int = typer.Option(40),
+    seed: int = typer.Option(0),
+):
+    """On-policy distillation: the student acts in the gym, Beam labels every state it reaches."""
+    import random
+
+    from apprentice.dagger import DaggerRecorder
+
+    tasks, refs = _usable_tasks(data_root, runs, split, seed)
+    tasks = [t for t in tasks if snapshot_path(t, data_root).exists()]
+    if limit:
+        tasks = tasks[:limit]
+    teacher_ledger = CostLedger(runs / "ledger.jsonl", cap_usd=lifetime_cap_usd, session_cap_usd=budget_usd)
+    teacher = BeamClient.from_env(teacher_ledger, meta={"run": run_id, "role": "teacher"},
+                                  extra_body={"allow_missing_thinking": True})
+    student_ledger = CostLedger(runs / run_id / "student_ledger.jsonl", cap_usd=1e9, prices=Prices(0, 0, 0))
+    student = BeamClient.from_env(student_ledger, base_url=student_url, model=student_model, meta={"run": run_id})
+    limits = Limits(turns=turns)
+    out_dir = runs / run_id
+    labels = out_dir / "dagger.jsonl"
+
+    def episode(task):
+        rec = DaggerRecorder(teacher, teacher_effort=teacher_effort, beta=beta,
+                             rng=random.Random(hash((seed, task.instance_id)) & 0xFFFFFFFF))
+        ep = run_episode(task, student, "none", limits, data_root, max_tokens=4096, turn_hook=rec)
+        ep.cost_usd += rec.teacher_cost
+        rec.write(labels, resolved=None)
+        return ep
+
+    typer.echo(f"teacher spend so far ${teacher_ledger.spent():.4f}; this run capped at ${budget_usd:.2f}")
+    run_baseline(tasks, episode_fn=episode, verify_fn=lambda t, p: verify(t, p, data_root, refs[t.instance_id]),
+                 out_dir=out_dir, effort="none", log=typer.echo, workers=workers)
+    typer.echo(summarize(read_results(out_dir)))
+    typer.echo(f"teacher spent ${teacher_ledger.session_spent():.4f} this run")
+
+
 @app.command("export-sft")
 def export_sft_cmd(
     run_ids: list[str] = typer.Argument(..., help="runs to draw verified episodes from"),
@@ -107,6 +157,22 @@ def export_sft_cmd(
 
     held, _ = _usable_tasks(data_root, runs, "held_out", seed)
     counts = export_sft([runs / r for r in run_ids], out, {t.instance_id for t in held}, max_tool_chars, one_per_task)
+    typer.echo(f"{out}: {counts}")
+
+
+@app.command("export-dagger")
+def export_dagger_cmd(
+    run_ids: list[str] = typer.Argument(..., help="dagger runs to export labels from"),
+    out: Path = typer.Option(Path("data/dagger.jsonl")),
+    data_root: Path = typer.Option(DEFAULT_DATA),
+    runs: Path = typer.Option(Path("runs")),
+    seed: int = typer.Option(0),
+):
+    """Export on-policy labels as last-step fine-tuning rows (held-out tasks are never included)."""
+    from apprentice.sft import export_dagger
+
+    held, _ = _usable_tasks(data_root, runs, "held_out", seed)
+    counts = export_dagger([runs / r / "dagger.jsonl" for r in run_ids], out, {t.instance_id for t in held})
     typer.echo(f"{out}: {counts}")
 
 

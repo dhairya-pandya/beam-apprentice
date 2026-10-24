@@ -51,7 +51,10 @@ def run_episode(
     data_root: Path | None,
     max_tokens: int = 8192,
     sandbox_factory: Callable = Sandbox,
+    turn_hook: Callable | None = None,
 ) -> Episode:
+    """turn_hook(history, completion, task) may return a different Completion to execute (used for
+    on-policy distillation, where a teacher labels the states the student reaches)."""
     started = time.time()
     with sandbox_factory(task, data_root) as sb:
         tools = Toolset(sb, limits)
@@ -76,6 +79,8 @@ def run_episode(
             except Exception as e:
                 stop, error = "error", f"{type(e).__name__}: {e}"
                 break
+            if turn_hook is not None:
+                c = turn_hook(messages, c, task) or c
             messages.append(assistant_message(c))
             _add_usage(totals, c.usage)
             cost += c.cost_usd
