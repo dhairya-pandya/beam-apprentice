@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Wait for a llama-server exposed on HF Jobs, then evaluate it on a split from this machine.
 # usage: scripts/eval_remote.sh <job id> <run id> [split] [workers]
-# The endpoint is authorised with the token stored for JOB_ACCOUNT (default oauth-dp2406342).
+# The endpoint is authorised with the token stored for JOB_ACCOUNT (default: the job namespace's login).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 job=$1; run_id=$2; split=${3:-held_out}; workers=${4:-2}
 url="https://${job##*/}--8080.hf.jobs"
-export APPRENTICE_API_KEY=$(python3 - "${JOB_ACCOUNT:-oauth-dp2406342}" <<'PY'
+export APPRENTICE_API_KEY=$(python3 - "${JOB_ACCOUNT:-oauth-${job%%/*}}" <<'PY'
 import configparser, os, sys
 c = configparser.ConfigParser(); c.read(os.path.expanduser("~/.cache/huggingface/stored_tokens"))
 print(c[sys.argv[1]]["hf_token"])
