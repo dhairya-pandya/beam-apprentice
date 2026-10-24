@@ -124,7 +124,7 @@ def dagger(
         tasks = tasks[:limit]
     teacher_ledger = CostLedger(runs / "ledger.jsonl", cap_usd=lifetime_cap_usd, session_cap_usd=budget_usd)
     teacher = BeamClient.from_env(teacher_ledger, meta={"run": run_id, "role": "teacher"},
-                                  extra_body={"allow_missing_thinking": True})
+                                  extra_body={"chat_template_kwargs": {"allow_missing_thinking": True}})
     student_ledger = CostLedger(runs / run_id / "student_ledger.jsonl", cap_usd=1e9, prices=Prices(0, 0, 0))
     student = BeamClient.from_env(student_ledger, base_url=student_url, model=student_model,
                                   api_key=student_api_key, meta={"run": run_id})
@@ -137,7 +137,9 @@ def dagger(
                              rng=random.Random(hash((seed, task.instance_id)) & 0xFFFFFFFF))
         ep = run_episode(task, student, "none", limits, data_root, max_tokens=4096, turn_hook=rec)
         ep.cost_usd += rec.teacher_cost
-        rec.write(labels, resolved=None)
+        n = rec.write(labels, resolved=None)
+        typer.echo(f"  {task.instance_id}: {n} labels, {rec.teacher_errors} teacher errors, "
+                   f"{rec.invalid_labels} invalid labels, teacher ${rec.teacher_cost:.4f}")
         return ep
 
     typer.echo(f"teacher spend so far ${teacher_ledger.spent():.4f}; this run capped at ${budget_usd:.2f}")
