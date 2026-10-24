@@ -9,7 +9,7 @@ def call(ts, name, **args):
 
 def test_schemas_cover_all_tools(local_sandbox):
     names = [s["function"]["name"] for s in Toolset(local_sandbox, Limits()).schemas()]
-    assert names == ["run_command", "read_file", "edit_file", "write_file", "submit_patch", "get_status"]
+    assert names == ["run_command", "read_file", "edit_file", "replace_lines", "write_file", "submit_patch", "get_status"]
 
 
 def test_read_file_line_slicing_and_caps(local_sandbox):
@@ -136,3 +136,46 @@ def test_write_file_decodes_escapes_only_when_no_real_newlines(local_sandbox):
     assert local_sandbox.read("w.py") == "a = 1\nb = 2\n"
     call(ts, "write_file", filepath="v.py", content='s = "x\\ny"\nt = 1\n')
     assert local_sandbox.read("v.py") == 's = "x\\ny"\nt = 1\n'
+
+
+def test_edit_decodes_escapes_mixed_with_real_newlines(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    ts = Toolset(local_sandbox, Limits())
+    out = call(ts, "edit_file", filepath="i.py",
+               old_string="        if x:\\n            return 1\n        return 2",
+               new_string="        if x:\\n            return 1\n        return 3")
+    assert out["status"] == "ok" and out["matched"] == "after decoding escapes"
+    assert local_sandbox.read("i.py").endswith("        return 3\n")
+
+
+def test_edit_handles_backslash_before_real_newline(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    ts = Toolset(local_sandbox, Limits())
+    out = call(ts, "edit_file", filepath="i.py",
+               old_string="        if x:\\\n            return 1", new_string="        if y:\\\n            return 1")
+    assert out["status"] == "ok"
+    assert "        if y:\n            return 1\n" in local_sandbox.read("i.py")
+
+
+def test_replace_lines_replaces_inclusive_range(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    ts = Toolset(local_sandbox, Limits())
+    out = call(ts, "replace_lines", filepath="i.py", start_line=3, end_line=4,
+               new_content="        if x is None:\n            return 0")
+    assert out["status"] == "ok" and out["lines_replaced"] == 2
+    assert local_sandbox.read("i.py") == (
+        "class A:\n    def f(self):\n        if x is None:\n            return 0\n        return 2\n")
+
+
+def test_replace_lines_rejects_bad_range(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    ts = Toolset(local_sandbox, Limits())
+    assert call(ts, "replace_lines", filepath="i.py", start_line=4, end_line=2, new_content="x")["status"] == "error"
+    assert call(ts, "replace_lines", filepath="i.py", start_line=1, end_line=99, new_content="x")["status"] == "error"
+
+
+def test_replace_lines_decodes_escaped_content(local_sandbox):
+    local_sandbox.write("i.py", INDENTED)
+    call(Toolset(local_sandbox, Limits()), "replace_lines", filepath="i.py", start_line=5, end_line=5,
+         new_content="        y = 1\\n        return y")
+    assert local_sandbox.read("i.py").endswith("        y = 1\n        return y\n")

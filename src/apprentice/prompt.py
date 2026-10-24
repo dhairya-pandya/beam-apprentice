@@ -50,7 +50,8 @@ def build_prompt(task: Task, workspace_listing: str, limits: Limits) -> str:
         "test files or test configuration are discarded before they run.\n"
         "3. Check your change with targeted tests or quick assertions before submitting.\n"
         "4. Put scratch scripts in /tmp, not /workspace, or they become part of your patch.\n"
-        "5. Call submit_patch as your final action."
+        "5. If edit_file cannot match your text, use replace_lines with the line numbers from read_file.\n"
+        "6. Call submit_patch as your final action."
     )
     parts.append(f"## Workspace layout\n{workspace_listing.strip()}")
     return "\n\n".join(parts)

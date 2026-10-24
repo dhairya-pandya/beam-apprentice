@@ -47,6 +47,10 @@ SCHEMAS = [
         "once unless allow_multiple is true.",
         {"filepath": _STR, "old_string": _STR, "new_string": _STR, "allow_multiple": _BOOL},
         ["filepath", "old_string", "new_string"]),
+    _fn("replace_lines", "Replace lines start_line..end_line (1-indexed, inclusive, as numbered by read_file) "
+        "with new_content. Use this when edit_file cannot match the text exactly.",
+        {"filepath": _STR, "start_line": _INT, "end_line": _INT, "new_content": _STR},
+        ["filepath", "start_line", "end_line", "new_content"]),
     _fn("write_file", "Create or overwrite a file, creating parent directories.",
         {"filepath": _STR, "content": _STR}, ["filepath", "content"]),
     _fn("submit_patch", "Submit your changes as the final patch. Call this last, after verifying the fix.",
@@ -80,6 +84,14 @@ def _decode_escapes(text: str) -> str:
 
 def _looks_escaped(text: str) -> bool:
     return "\\n" in text and "\n" not in text
+
+
+def _escape_variants(text: str) -> list[str]:
+    """Readings of text an agent may have meant when it copied JSON escapes, most literal first."""
+    if "\\" not in text:
+        return []
+    variants = [_decode_escapes(text), _decode_escapes(text.replace("\\\n", "\n"))]
+    return [v for i, v in enumerate(variants) if v != text and v not in variants[:i]]
 
 
 def _indent(line: str) -> str:
@@ -207,13 +219,15 @@ class Toolset:
         if count == 0:
             fuzzy = _replace_ignoring_indentation(text, old_string, new_string)
             matched = "ignoring indentation"
-            if fuzzy is None and _looks_escaped(old_string):
-                old_d, new_d = _decode_escapes(old_string), _decode_escapes(new_string)
-                if text.count(old_d) == 1:
-                    fuzzy = text.replace(old_d, new_d)
-                else:
-                    fuzzy = _replace_ignoring_indentation(text, old_d, new_d)
-                matched = "after decoding escapes"
+            if fuzzy is None:
+                for old_d, new_d in zip(_escape_variants(old_string), _escape_variants(new_string) or [new_string] * 2):
+                    if text.count(old_d) == 1:
+                        fuzzy = text.replace(old_d, new_d)
+                    else:
+                        fuzzy = _replace_ignoring_indentation(text, old_d, new_d)
+                    if fuzzy is not None:
+                        matched = "after decoding escapes"
+                        break
             if fuzzy is None:
                 raise ToolError("old_string not found; read the file again and copy the text exactly")
             self.sb.write(path, fuzzy)
@@ -222,6 +236,27 @@ class Toolset:
             raise ToolError(f"old_string matches {count} times; add context or set allow_multiple")
         self.sb.write(path, text.replace(old_string, new_string))
         return {"status": "ok", "replacements": count, "matched": "exact"}
+
+    def _t_replace_lines(self, filepath: str, start_line: int, end_line: int, new_content: str) -> dict:
+        path = self._path(filepath)
+        try:
+            text = self.sb.read(path)
+        except FileNotFoundError:
+            raise ToolError(f"file not found: {filepath}")
+        lines = text.split("\n")
+        trailing = text.endswith("\n")
+        if trailing:
+            lines = lines[:-1]
+        if not (1 <= start_line <= end_line <= len(lines)):
+            raise ToolError(f"need 1 <= start_line <= end_line <= {len(lines)}; got {start_line}..{end_line}")
+        if _looks_escaped(new_content):
+            new_content = _decode_escapes(new_content)
+        new_lines = new_content.split("\n")
+        if new_lines and new_lines[-1] == "":
+            new_lines = new_lines[:-1]
+        out = lines[: start_line - 1] + new_lines + lines[end_line:]
+        self.sb.write(path, "\n".join(out) + ("\n" if trailing else ""))
+        return {"status": "ok", "lines_replaced": end_line - start_line + 1, "new_total_lines": len(out)}
 
     def _t_write_file(self, filepath: str, content: str) -> dict:
         path = self._path(filepath)
