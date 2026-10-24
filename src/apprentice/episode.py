@@ -52,6 +52,7 @@ def run_episode(
     max_tokens: int = 8192,
     sandbox_factory: Callable = Sandbox,
     turn_hook: Callable | None = None,
+    prompt_builder: Callable = build_prompt,
 ) -> Episode:
     """turn_hook(history, completion, task) may return a different Completion to execute (used for
     on-policy distillation, where a teacher labels the states the student reaches)."""
@@ -60,7 +61,7 @@ def run_episode(
         tools = Toolset(sb, limits)
         messages: list[dict] = [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": build_prompt(task, tools.workspace_listing(), limits)},
+            {"role": "user", "content": prompt_builder(task, tools.workspace_listing(), limits)},
         ]
         totals: dict = {}
         cost = 0.0
