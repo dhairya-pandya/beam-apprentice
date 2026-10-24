@@ -12,6 +12,8 @@ act and reason, not to invent command output.
 Configured by environment variables so it runs unchanged under `colab exec -f` or `hf jobs uv run`:
     SFT_DATA=/content/sft.jsonl  SFT_OUT=/content/out  SFT_MODEL=unsloth/gemma-4-E4B-it
     SFT_MAX_LEN=6144  SFT_EPOCHS=2  SFT_LR=1e-4  SFT_RANK=16  SFT_MAX_STEPS=0  SFT_THINKING=1
+    SFT_MAX_TURNS=0                        drop sessions longer than this many turns (0 keeps all)
+    SRC_HF_TOKEN=...                       token for the data/adapter repos, if they belong to another account
     SFT_HUB_DATA=user/dataset:file.jsonl   read training data from a (private) Hub dataset
     SFT_PUSH_REPO=user/model               push the adapter and training log to a (private) model repo
 """
@@ -151,13 +153,15 @@ def _start_memory_log(every_s: int = 20) -> None:
 
 def main() -> None:
     data_path = os.environ.get("SFT_DATA", "/content/sft.jsonl")
+    hub_token = os.environ.get("SRC_HF_TOKEN") or None
+    max_turns = int(os.environ.get("SFT_MAX_TURNS", "0"))
     hub_data = os.environ.get("SFT_HUB_DATA", "")
     push_repo = os.environ.get("SFT_PUSH_REPO", "")
     if hub_data:
         from huggingface_hub import hf_hub_download
 
         repo_id, filename = hub_data.split(":", 1)
-        data_path = hf_hub_download(repo_id, filename, repo_type="dataset")
+        data_path = hf_hub_download(repo_id, filename, repo_type="dataset", token=hub_token)
     out_dir = os.environ.get("SFT_OUT", "/content/out" if os.path.isdir("/content") else "/tmp/out")
     model_id = os.environ.get("SFT_MODEL", "unsloth/gemma-4-E4B-it")
     max_len = int(os.environ.get("SFT_MAX_LEN", "6144"))
@@ -185,6 +189,8 @@ def main() -> None:
     rows, dropped, lengths, sessions = [], 0, [], 0
     for line in open(data_path):
         ex = json.loads(line)
+        if max_turns and ex.get("turns", 0) > max_turns:
+            continue
         sessions += 1
         text = tok.apply_chat_template(
             prepare_messages(ex, thinking), tools=ex["tools"], tokenize=False,
@@ -261,7 +267,7 @@ def main() -> None:
     if push_repo:
         from huggingface_hub import HfApi
 
-        api = HfApi()
+        api = HfApi(token=hub_token)
         api.upload_folder(repo_id=push_repo, folder_path=adapter_dir, commit_message="LoRA adapter")
         api.upload_file(repo_id=push_repo, path_or_fileobj=f"{out_dir}/train_log.json",
                         path_in_repo="train_log.json", commit_message="training log")
