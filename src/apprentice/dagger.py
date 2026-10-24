@@ -19,6 +19,8 @@ from pathlib import Path
 from apprentice.beam_client import ChatClient, Completion, assistant_message
 from apprentice.tools import SCHEMAS
 
+TOOL_NAMES = {s["function"]["name"] for s in SCHEMAS}
+
 
 def teacher_view(messages: list[dict]) -> list[dict]:
     """History as the teacher should see it: the student's reasoning removed, actions kept."""
@@ -43,6 +45,7 @@ class DaggerRecorder:
         self.rng = rng or random.Random(0)
         self.samples: list[dict] = []
         self.teacher_errors = 0
+        self.invalid_labels = 0
         self.teacher_cost = 0.0
 
     def __call__(self, history: list[dict], student: Completion, task) -> Completion:
@@ -54,6 +57,9 @@ class DaggerRecorder:
         self.teacher_cost += t.cost_usd
         if not t.tool_calls and not t.content.strip():
             return student  # an empty teacher reply is not a label
+        if any(c.name not in TOOL_NAMES for c in t.tool_calls):
+            self.invalid_labels += 1  # e.g. a tool the gym does not have
+            return student
         use_teacher = self.rng.random() < self.beta
         self.samples.append({
             "instance_id": task.instance_id,

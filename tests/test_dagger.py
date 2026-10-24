@@ -87,3 +87,11 @@ def test_teacher_failure_falls_back_to_student(local_sandbox):
     ep, rec = run(student, Broken(), local_sandbox, beta=1.0)
     assert ep.stop_reason == "submitted"
     assert rec.samples == [] and rec.teacher_errors == 1
+
+
+def test_teacher_steps_with_unknown_tools_are_not_labels(local_sandbox):
+    student = Scripted([comp([tc("submit_patch", 1)])])
+    teacher = Scripted([comp([tc("bash", 1, command="ls")])])
+    ep, rec = run(student, teacher, local_sandbox, beta=1.0)
+    assert rec.samples == [] and rec.invalid_labels == 1
+    assert ep.stop_reason == "submitted"  # student's action ran instead
