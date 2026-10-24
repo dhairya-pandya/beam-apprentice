@@ -60,7 +60,7 @@ def baseline(
     seed: int = typer.Option(0),
     model: str = typer.Option(BEAM_MODEL),
     base_url: str = typer.Option(HF_ROUTER),
-    api_key: str = typer.Option("", help="for local servers; default uses your Hugging Face login"),
+    api_key: str = typer.Option("", help="key for the endpoint; else $APPRENTICE_API_KEY, else your Hugging Face login"),
     free: bool = typer.Option(False, help="price calls at $0 (local model)"),
     workers: int = typer.Option(1, help="episodes to run in parallel"),
     unsolved_in: str = typer.Option("", help="only tasks not resolved in these runs (comma-separated run ids)"),

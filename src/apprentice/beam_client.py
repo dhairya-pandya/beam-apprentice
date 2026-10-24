@@ -101,7 +101,7 @@ class BeamClient:
                  api_key: str | None = None, **kw):
         from openai import OpenAI
 
-        token = api_key or hf_token()
+        token = api_key or os.environ.get("APPRENTICE_API_KEY") or hf_token()
         return cls(OpenAI(base_url=base_url, api_key=token, timeout=600), ledger, model, **kw)
 
     def _send(self, messages, tools, effort, max_tokens):
