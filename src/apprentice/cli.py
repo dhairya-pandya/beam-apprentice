@@ -133,6 +133,13 @@ def dagger(
     labels = out_dir / "dagger.jsonl"
 
     def episode(task):
+        import time
+
+        from apprentice.beam_client import provider_live
+
+        while not provider_live():
+            typer.echo("  teacher provider is down; waiting 2 minutes")
+            time.sleep(120)
         rec = DaggerRecorder(teacher, teacher_effort=teacher_effort, beta=beta,
                              rng=random.Random(hash((seed, task.instance_id)) & 0xFFFFFFFF))
         ep = run_episode(task, student, "none", limits, data_root, max_tokens=4096, turn_hook=rec)

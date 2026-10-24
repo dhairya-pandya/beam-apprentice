@@ -19,6 +19,21 @@ BEAM_MODEL = "reflection/Beam-1.0-501B-A23B"
 HF_ROUTER = "https://router.huggingface.co/v1"
 MAX_COMPLETION_CAP = 32768
 TRANSIENT_RETRIES = 4
+OUTAGE_RETRIES = 10  # about five minutes of 30-second waits
+
+
+def provider_live(model: str = BEAM_MODEL) -> bool:
+    """Whether the Hugging Face router currently lists a live provider for the model."""
+    import json
+    import urllib.request
+
+    url = f"https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            mapping = json.load(r).get("inferenceProviderMapping") or {}
+    except Exception:
+        return False
+    return any(v.get("status") == "live" for v in mapping.values())
 
 
 @dataclass(frozen=True)
@@ -118,12 +133,13 @@ class BeamClient:
             try:
                 return self.client.chat.completions.create(**kwargs)
             except Exception as e:
-                transient = getattr(e, "status_code", None) in (429, 500, 502, 503, 504) or type(
+                outage = "not supported by any provider" in str(e)  # provider briefly dropped the model
+                transient = outage or getattr(e, "status_code", None) in (429, 500, 502, 503, 504) or type(
                     e
                 ).__name__ in ("APIConnectionError", "APITimeoutError")
-                if not transient or attempt == TRANSIENT_RETRIES:
+                if not transient or attempt == (OUTAGE_RETRIES if outage else TRANSIENT_RETRIES):
                     raise
-                time.sleep(min(60, 2 * 2**attempt))
+                time.sleep(30 if outage else min(60, 2 * 2**attempt))
 
     def complete(self, messages: list[dict], tools: list[dict], effort: str, max_tokens: int) -> Completion:
         budget = max_tokens

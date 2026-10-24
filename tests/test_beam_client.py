@@ -99,3 +99,24 @@ def test_extra_body_is_sent(tmp_path):
                         extra_body={"allow_missing_thinking": True})
     client.complete([], [], "low", 100)
     assert fake.calls[0]["extra_body"] == {"allow_missing_thinking": True}
+
+
+def test_provider_outage_is_retried(tmp_path, monkeypatch):
+    import apprentice.beam_client as bc
+    monkeypatch.setattr(bc.time, "sleep", lambda s: None)
+
+    class Outage(Exception):
+        status_code = 400
+        body = {"code": "model_not_supported"}
+
+    calls = []
+
+    class Flaky(FakeOpenAI):
+        def _create(self, **kw):
+            calls.append(1)
+            if len(calls) < 3:
+                raise Outage("The requested model is not supported by any provider you have enabled.")
+            return _resp(content="ok")
+
+    out = _client(Flaky([]), tmp_path).complete([], [], "low", 100)
+    assert out.content == "ok" and len(calls) == 3
