@@ -97,6 +97,8 @@ def dagger(
     run_id: str = typer.Option(..., help="results go to runs/<run_id>/; labels to runs/<run_id>/dagger.jsonl"),
     student_url: str = typer.Option(..., help="OpenAI-compatible base URL serving the student"),
     student_model: str = typer.Option("student"),
+    student_api_key: str = typer.Option("local", help="key for the student endpoint"),
+    sample_seed: int = typer.Option(-1, help=">=0: shuffle tasks with this seed before --limit"),
     data_root: Path = typer.Option(DEFAULT_DATA),
     runs: Path = typer.Option(Path("runs")),
     split: str = typer.Option("train"),
@@ -116,13 +118,16 @@ def dagger(
 
     tasks, refs = _usable_tasks(data_root, runs, split, seed)
     tasks = [t for t in tasks if snapshot_path(t, data_root).exists()]
+    if sample_seed >= 0:
+        random.Random(sample_seed).shuffle(tasks)
     if limit:
         tasks = tasks[:limit]
     teacher_ledger = CostLedger(runs / "ledger.jsonl", cap_usd=lifetime_cap_usd, session_cap_usd=budget_usd)
     teacher = BeamClient.from_env(teacher_ledger, meta={"run": run_id, "role": "teacher"},
                                   extra_body={"allow_missing_thinking": True})
     student_ledger = CostLedger(runs / run_id / "student_ledger.jsonl", cap_usd=1e9, prices=Prices(0, 0, 0))
-    student = BeamClient.from_env(student_ledger, base_url=student_url, model=student_model, meta={"run": run_id})
+    student = BeamClient.from_env(student_ledger, base_url=student_url, model=student_model,
+                                  api_key=student_api_key, meta={"run": run_id})
     limits = Limits(turns=turns)
     out_dir = runs / run_id
     labels = out_dir / "dagger.jsonl"
