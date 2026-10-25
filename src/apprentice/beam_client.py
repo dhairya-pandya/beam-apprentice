@@ -19,7 +19,7 @@ BEAM_MODEL = "reflection/Beam-1.0-501B-A23B"
 HF_ROUTER = "https://router.huggingface.co/v1"
 MAX_COMPLETION_CAP = 32768
 TRANSIENT_RETRIES = 4
-OUTAGE_RETRIES = 10  # about five minutes of 30-second waits
+OUTAGE_RETRIES = 40  # about twenty minutes of 30-second waits
 
 
 class EmptyResponse(RuntimeError):

@@ -54,7 +54,8 @@ SCHEMAS = [
     _fn("write_file", "Create or overwrite a file, creating parent directories.",
         {"filepath": _STR, "content": _STR}, ["filepath", "content"]),
     _fn("submit_patch", "Submit your changes as the final patch. Call this last, after verifying the fix.",
-        {}, []),
+        {"note": {"type": "string", "description": "Optional message to the user who gave you the task, "
+                  "like a pull request description."}}, []),
     _fn("get_status", "Show remaining tool calls and turns.", {}, []),
 ]
 
@@ -143,6 +144,7 @@ class Toolset:
         self.turns_used = 0
         self.submitted = False
         self.patch = ""
+        self.note = ""
 
     def schemas(self) -> list[dict]:
         return SCHEMAS
@@ -265,7 +267,8 @@ class Toolset:
         self.sb.write(path, content)
         return {"status": "ok", "bytes": len(content.encode())}
 
-    def _t_submit_patch(self) -> dict:
+    def _t_submit_patch(self, note: str = "") -> dict:
+        self.note = note
         self.patch = strip_protected(self.sb.diff())
         self.submitted = True
         files = [line[6:] for line in self.patch.splitlines() if line.startswith("+++ b/")]
