@@ -22,6 +22,10 @@ TRANSIENT_RETRIES = 4
 OUTAGE_RETRIES = 10  # about five minutes of 30-second waits
 
 
+class EmptyResponse(RuntimeError):
+    """The router answered 200 but with no choices; seen while the provider is flapping."""
+
+
 def provider_live(model: str = BEAM_MODEL) -> bool:
     """Whether the Hugging Face router currently lists a live provider for the model."""
     import json
@@ -129,11 +133,14 @@ class BeamClient:
             kwargs["tools"] = tools
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
-        for attempt in range(TRANSIENT_RETRIES + 1):
+        for attempt in range(max(TRANSIENT_RETRIES, OUTAGE_RETRIES) + 1):
             try:
-                return self.client.chat.completions.create(**kwargs)
+                resp = self.client.chat.completions.create(**kwargs)
+                if not getattr(resp, "choices", None):
+                    raise EmptyResponse("provider returned a response with no choices")
+                return resp
             except Exception as e:
-                outage = "not supported by any provider" in str(e)  # provider briefly dropped the model
+                outage = "not supported by any provider" in str(e) or isinstance(e, EmptyResponse)
                 transient = outage or getattr(e, "status_code", None) in (429, 500, 502, 503, 504) or type(
                     e
                 ).__name__ in ("APIConnectionError", "APITimeoutError")
