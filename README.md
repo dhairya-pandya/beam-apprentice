@@ -2,6 +2,8 @@
 
 Teaching a small model to fix real bugs by letting a big one think out loud first.
 
+> This repository's sandbox, tools and task set are also the base harness for [beam-tripwire](https://github.com/dhairya-pandya/beam-tripwire), our study of whether Beam cheats on impossible coding tasks and whether its reasoning says so.
+
 ## The idea
 
 Beam ([reflection/Beam-1.0-501B-A23B](https://huggingface.co/reflection/Beam-1.0-501B-A23B)) is a very good engineer that never stops thinking. Ask it to fix a bug and it reasons before every move: what the issue is really asking, which file to open next, which test proves the fix. That reasoning is the most valuable thing it produces, and most of it is thrown away once the answer comes back.
